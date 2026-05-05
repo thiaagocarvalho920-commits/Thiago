@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard Energia MQTT</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+    }
+
+    header {
+      padding: 24px 32px;
+      background: #020617;
+      border-bottom: 1px solid #1e293b;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+
+    header p {
+      margin: 8px 0 0;
+      color: #94a3b8;
+    }
+
+    .container {
+      padding: 28px;
+      display: grid;
+      gap: 20px;
+    }
+
+    .status-card, .card {
+      background: #1e293b;
+      padding: 22px;
+      border-radius: 18px;
+      border: 1px solid #334155;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+    }
+
+    .status-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .status-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #f59e0b;
+    }
+
+    .online { background: #22c55e; }
+    .offline { background: #ef4444; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    .card h2 {
+      margin: 0 0 16px;
+      color: #cbd5e1;
+      font-size: 18px;
+      text-align: center;
+    }
+
+    .gauge-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    canvas {
+      width: 100%;
+      max-width: 280px;
+      height: 160px;
+    }
+
+    .valor {
+      font-size: 32px;
+      font-weight: bold;
+      margin-top: -10px;
+    }
+
+    .unidade {
+      font-size: 18px;
+      color: #94a3b8;
+      margin-left: 4px;
+    }
+
+    .label-range {
+      color: #94a3b8;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+
+    .commands {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      padding: 13px 20px;
+      border: 0;
+      border-radius: 10px;
+      font-weight: bold;
+      cursor: pointer;
+      color: white;
+      background: #2563eb;
+    }
+
+    button:hover { opacity: 0.85; }
+
+    .danger { background: #dc2626; }
+
+    pre {
+      background: #020617;
+      padding: 16px;
+      border-radius: 12px;
+      overflow-x: auto;
+      color: #a7f3d0;
+    }
+
+    .history {
+      max-height: 180px;
+      overflow-y: auto;
+      background: #020617;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      color: #cbd5e1;
+    }
+
+    .history div {
+      padding: 6px 0;
+      border-bottom: 1px solid #1e293b;
+    }
+
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+
+<header>
+  <h1>Dashboard de Monitoramento de Energia</h1>
+  <p>ESP32 + SCT013 + MQTT + HiveMQ</p>
+</header>
+
+<div class="container">
+
+  <div class="status-card">
+    <div class="status-left">
+      <div id="statusDot" class="dot"></div>
+      <div>
+        <strong>Status MQTT</strong>
+        <div id="status">Conectando...</div>
+      </div>
+    </div>
+    <div>
+      Última atualização: <strong id="ultimaAtualizacao">--:--:--</strong>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Corrente</h2>
+      <div class="gauge-box">
+        <canvas id="gaugeCorrente" width="300" height="180"></canvas>
+        <div><span id="corrente" class="valor">--</span><span class="unidade">A</span></div>
+        <div class="label-range">0 a 10 A</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Potência</h2>
+      <div class="gauge-box">
+        <canvas id="gaugePotencia" width="300" height="180"></canvas>
+        <div><span id="potencia" class="valor">--</span><span class="unidade">W</span></div>
+        <div class="label-range">0 a 2200 W</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Energia</h2>
+      <div class="gauge-box">
+        <canvas id="gaugeEnergia" width="300" height="180"></canvas>
+        <div><span id="energia" class="valor">--</span><span class="unidade">kWh</span></div>
+        <div class="label-range">0 a 1 kWh</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Comandos</h2>
+    <div class="commands">
+      <button onclick="enviarComando('status')">Atualizar Status</button>
+      <button class="danger" onclick="enviarComando('reset')">Resetar Energia</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Último JSON recebido</h2>
+    <pre id="json">Aguardando dados...</pre>
+  </div>
+
+  <div class="card">
+    <h2>Histórico de mensagens</h2>
+    <div id="historico" class="history">Aguardando mensagens...</div>
+  </div>
+
+</div>
+
+<script>
+  const broker = "wss://broker.hivemq.com:8884/mqtt";
+
+  const topicStatus = "ruan/energia/status";
+  const topicCmd = "ruan/energia/cmd";
+
+  const correnteMax = 10;
+  const potenciaMax = 2200;
+  const energiaMax = 1;
+
+  const client = mqtt.connect(broker, {
+    clientId: "dashboard-energia-" + Math.random().toString(16).substr(2, 8),
+    clean: true,
+    reconnectPeriod: 2000
+  });
+
+  function setStatus(texto, estado) {
+    document.getElementById("status").innerText = texto;
+    document.getElementById("statusDot").className = "dot " + estado;
+  }
+
+  function desenharGauge(canvasId, valor, maximo) {
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext("2d");
+
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2;
+    const cy = h * 0.82;
+    const raio = 105;
+    const largura = 24;
+
+    const inicio = Math.PI;
+    const fim = 2 * Math.PI;
+
+    function arco(cor, ini, fim) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, raio, ini, fim);
+      ctx.lineWidth = largura;
+      ctx.strokeStyle = cor;
+      ctx.lineCap = "butt";
+      ctx.stroke();
+    }
+
+    arco("#ef4444", Math.PI, Math.PI + Math.PI * 0.33);
+    arco("#facc15", Math.PI + Math.PI * 0.33, Math.PI + Math.PI * 0.70);
+    arco("#22c55e", Math.PI + Math.PI * 0.70, 2 * Math.PI);
+
+    const percentual = Math.min(Math.max(valor / maximo, 0), 1);
+    const angulo = inicio + percentual * (fim - inicio);
+
+    const ponteiroRaio = raio - 10;
+    const px = cx + Math.cos(angulo) * ponteiroRaio;
+    const py = cy + Math.sin(angulo) * ponteiroRaio;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(px, py);
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = "#f8fafc";
+    ctx.lineCap = "round";
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, 9, 0, 2 * Math.PI);
+    ctx.fillStyle = "#f8fafc";
+    ctx.fill();
+
+    ctx.font = "13px Arial";
+    ctx.fillStyle = "#94a3b8";
+    ctx.textAlign = "center";
+    ctx.fillText("0", cx - raio, cy + 20);
+    ctx.fillText(maximo, cx + raio, cy + 20);
+  }
+
+  desenharGauge("gaugeCorrente", 0, correnteMax);
+  desenharGauge("gaugePotencia", 0, potenciaMax);
+  desenharGauge("gaugeEnergia", 0, energiaMax);
+
+  client.on("connect", function () {
+    setStatus("Conectado ao broker MQTT", "online");
+    client.subscribe(topicStatus);
+    client.publish(topicCmd, "status");
+  });
+
+  client.on("message", function (topic, message) {
+    const texto = message.toString();
+    document.getElementById("json").innerText = texto;
+
+    const agora = new Date().toLocaleTimeString();
+    document.getElementById("ultimaAtualizacao").innerText = agora;
+
+    try {
+      const dados = JSON.parse(texto);
+
+      document.getElementById("corrente").innerText = dados.corrente_A.toFixed(3);
+      document.getElementById("potencia").innerText = dados.potencia_W.toFixed(2);
+      document.getElementById("energia").innerText = dados.energia_kWh.toFixed(5);
+
+      desenharGauge("gaugeCorrente", dados.corrente_A, correnteMax);
+      desenharGauge("gaugePotencia", dados.potencia_W, potenciaMax);
+      desenharGauge("gaugeEnergia", dados.energia_kWh, energiaMax);
+
+      adicionarHistorico(agora, dados);
+
+    } catch (e) {
+      console.log("Mensagem nao JSON:", texto);
+    }
+  });
+
+  client.on("error", function (err) {
+    setStatus("Erro MQTT: " + err.message, "offline");
+  });
+
+  client.on("offline", function () {
+    setStatus("MQTT offline", "offline");
+  });
+
+  client.on("reconnect", function () {
+    setStatus("Reconectando ao broker MQTT...", "");
+  });
+
+  function enviarComando(cmd) {
+    client.publish(topicCmd, cmd);
+  }
+
+  function adicionarHistorico(hora, dados) {
+    const historico = document.getElementById("historico");
+
+    if (historico.innerText === "Aguardando mensagens...") {
+      historico.innerHTML = "";
+    }
+
+    const linha = document.createElement("div");
+    linha.innerText =
+      hora +
+      " | I: " + dados.corrente_A.toFixed(3) + " A" +
+      " | P: " + dados.potencia_W.toFixed(2) + " W" +
+      " | E: " + dados.energia_kWh.toFixed(5) + " kWh";
+
+    historico.prepend(linha);
+
+    if (historico.children.length > 20) {
+      historico.removeChild(historico.lastChild);
+    }
+  }
+</script>
+
+</body>
+</html>
